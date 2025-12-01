@@ -1,4 +1,9 @@
 
+#IMPORTANTE
+
+Este proyecto no es compatible con Python 3.13. Necesita Python 3.12 / 3.11 (o similar).
+en Python 3.13 el módulo cgi fue eliminado de la librería estándar
+
 # PMS 
 
 A small open-source PMS app made with Django.
