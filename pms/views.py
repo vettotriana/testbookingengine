@@ -6,8 +6,10 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from .form_dates import Ymd
 from .forms import *
-from .models import Room
+from .models import Room, Booking
 from .reservation_code import generate
+
+
 
 
 class BookingSearchView(View):
@@ -174,54 +176,132 @@ class EditBookingView(View):
             return redirect("/")
 
 
+class EditBookingDatesView(View):
+    # mostrar formulario
+    def get(self, request, pk):
+        booking = Booking.objects.get(id=pk)
+        form = BookingDatesForm(instance=booking)
+        context = {
+            "booking": booking,
+            "form": form,
+            "error": None,
+        }
+        return render(request, "edit_booking_dates.html", context)
+
+    # guardar cambios
+    def post(self, request, pk):
+        booking = Booking.objects.get(id=pk)
+        form = BookingDatesForm(request.POST, instance=booking)
+        error = None
+
+        if form.is_valid():
+            new_checkin = form.cleaned_data["checkin"]
+            new_checkout = form.cleaned_data["checkout"]
+
+            # 1) validar solapamiento con OTRAS reservas de la misma habitación
+            overlapping = (
+                Booking.objects
+                .filter(
+                    room=booking.room,
+                    checkin__lte=new_checkout,
+                    checkout__gte=new_checkin,
+                )
+                .exclude(id=booking.id)      # excluir la misma reserva
+                .exclude(state="DEL")        # excluir canceladas
+            )
+
+            if overlapping.exists():
+                error = "No hay disponibilidad para las fechas seleccionadas"
+            else:
+                # 2) recalcular total (mismo criterio que al crear)
+                total_days = (new_checkout - new_checkin).days
+                booking.total = total_days * booking.room.room_type.price
+                form.save()
+                return redirect("/")
+
+        context = {
+            "booking": booking,
+            "form": form,
+            "error": error,
+        }
+        return render(request, "edit_booking_dates.html", context)
+
+
 class DashboardView(View):
     def get(self, request):
         from datetime import date, time, datetime
+
         today = date.today()
 
         # get bookings created today
         today_min = datetime.combine(today, time.min)
         today_max = datetime.combine(today, time.max)
         today_range = (today_min, today_max)
-        new_bookings = (Booking.objects
-                        .filter(created__range=today_range)
-                        .values("id")
-                        ).count()
+        new_bookings = (
+            Booking.objects
+            .filter(created__range=today_range)
+            .values("id")
+        ).count()
+
+        # total habitaciones
+        total_rooms = Room.objects.count()
 
         # get incoming guests
-        incoming = (Booking.objects
-                    .filter(checkin=today)
-                    .exclude(state="DEL")
-                    .values("id")
-                    ).count()
+        incoming = (
+            Booking.objects
+            .filter(checkin=today)
+            .exclude(state="DEL")
+            .values("id")
+        ).count()
 
         # get outcoming guests
-        outcoming = (Booking.objects
-                     .filter(checkout=today)
-                     .exclude(state="DEL")
-                     .values("id")
-                     ).count()
+        outcoming = (
+            Booking.objects
+            .filter(checkout=today)
+            .exclude(state="DEL")
+            .values("id")
+        ).count()
 
-        # get outcoming guests
-        invoiced = (Booking.objects
-                    .filter(created__range=today_range)
-                    .exclude(state="DEL")
-                    .aggregate(Sum('total'))
-                    )
+        # get invoiced today
+        invoiced = (
+            Booking.objects
+            .filter(created__range=today_range)
+            .exclude(state="DEL")
+            .aggregate(Sum('total'))
+        )
+
+        # habitaciones ocupadas hoy
+        occupied_today = (
+            Room.objects
+            .filter(
+                booking__checkin__lte=today,
+                booking__checkout__gte=today,
+            )
+            .exclude(booking__state="DEL")  # excluir canceladas
+            .distinct()
+            .count()
+        )
+
+        # porcentaje de ocupación
+        if total_rooms > 0:
+            occupancy_percentage = round((occupied_today / total_rooms) * 100, 1)
+        else:
+            occupancy_percentage = 0
 
         # preparing context data
         dashboard = {
-            'new_bookings': new_bookings,
-            'incoming_guests': incoming,
-            'outcoming_guests': outcoming,
-            'invoiced': invoiced
-
+            "new_bookings": new_bookings,
+            "incoming_guests": incoming,
+            "outcoming_guests": outcoming,
+            "invoiced": invoiced,
+            "occupancy_percentage": occupancy_percentage,
+            "occupied_today": occupied_today,
+            "total_rooms": total_rooms,
         }
 
-        context = {
-            'dashboard': dashboard
-        }
+        context = {"dashboard": dashboard}
         return render(request, "dashboard.html", context)
+
 
 
 class RoomDetailsView(View):
@@ -238,9 +318,19 @@ class RoomDetailsView(View):
 
 class RoomsView(View):
     def get(self, request):
-        # renders a list of rooms
-        rooms = Room.objects.all().values("name", "room_type__name", "id")
+        # renders a list of rooms with optional name filter
+        name_filter = request.GET.get("name", "").strip()
+
+        rooms = Room.objects.all()
+
+        if name_filter:
+            rooms = rooms.filter(name__icontains=name_filter)
+
+        rooms = rooms.values("name", "room_type__name", "id")
+
         context = {
-            'rooms': rooms
+            "rooms": rooms,
+            "name_filter": name_filter,  # para rellenar el input en el template
         }
         return render(request, "rooms.html", context)
+
