@@ -1,0 +1,29 @@
+{% extends "main.html"%}
+
+{% block content %}
+<div class="container mt-4">
+  <h2>Editar fechas de la reserva {{ booking.code }}</h2>
+  <p>Habitación: {{ booking.room.name }}</p>
+
+  {% if error %}
+    <div class="alert alert-danger">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="form-group">
+      <label for="id_checkin">Fecha de entrada</label>
+      {{ form.checkin }}
+    </div>
+    <div class="form-group mt-2">
+      <label for="id_checkout">Fecha de salida</label>
+      {{ form.checkout }}
+    </div>
+
+    <button type="submit" class="btn btn-primary mt-3">Guardar</button>
+    <a href="/" class="btn btn-secondary mt-3">Cancelar</a>
+  </form>
+</div>
+{% endblock %}
